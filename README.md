@@ -8,7 +8,7 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 * **Portable:** Single .exe file. No installation. No admin rights.
 
 ## How to Use
-1.  Download `QuickOCR.zip` from the [Releases] page.
+1. Download `QuickOCR.zip` from the link below.
 2.  Run `QuickOCR.exe`.
 3.  Click **SNIP NOW**.
 4.  Draw a box around any text.
