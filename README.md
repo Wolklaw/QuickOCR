@@ -19,4 +19,4 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 * No other dependencies (Tesseract is bundled).
 
 ## Download
-[Link to your Releases page will go here]
+[DOWNLOAD QuickOCR v1.0.0](https://github.com/Wolklaw/QuickOCR/releases/tag/v1.0.0)
