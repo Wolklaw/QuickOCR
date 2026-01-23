@@ -20,3 +20,13 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 
 ## Download
 [DOWNLOAD QuickOCR v1.0.0](https://github.com/Wolklaw/QuickOCR/releases/tag/v1.0.0)
+
+## Legal & License
+
+**License**
+This project is licensed under the **GNU GPLv3 License** - see the [LICENSE](LICENSE) file for details.
+
+**What this means:**
+* You **cannot** close the source code and sell this application.
+* Any modifications you distribute must also be open source under GPLv3.
+* This software is free and open source. **Do not pay for this software.**
