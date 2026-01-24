@@ -10,7 +10,7 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 ## How to Use
 1. Download `QuickOCR.7z` from the link below.
 2.  Run `QuickOCR.exe`.
-3.  Click **CAPTURE NOW**.
+3.  Click **CAPTURE ZONE**.
 4.  Draw a box around any text.
 5.  The text is automatically copied to your clipboard.
 
