@@ -10,18 +10,18 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 * **Portable:** Single .exe file. No installation. No admin rights.
 
 ## How to Use
-1. Download `QuickOCR.7z` from the link below.
-2.  Run `QuickOCR.exe`.
-3.  Click **CAPTURE ZONE**.
-4.  Draw a box around any text.
-5.  The text is automatically copied to your clipboard.
+1. Download `QuickOCR.exe` from the link below.
+2. Run `QuickOCR.exe` (It is a single file, no installation needed).
+3. Click **CAPTURE ZONE**.
+4. Draw a box around any text.
+5. The text is automatically copied to your clipboard.
 
 ## Requirements
 * Windows 10/11
 * No other dependencies (Tesseract is bundled).
 
 ## Download
-[DOWNLOAD QuickOCR v1.0.0](https://github.com/Wolklaw/QuickOCR/releases/tag/v1.0.0)
+[DOWNLOAD LATEST VERSION](https://github.com/Wolklaw/QuickOCR/releases/latest)
 
 ## Legal & License
 
