@@ -1,3 +1,4 @@
+[🇫🇷 Version Française](README_FR.md)
 # QuickOCR
 A portable, offline OCR utility for Windows. Instantly capture and extract text from images, videos, games, and uncopiable UI elements.
 
