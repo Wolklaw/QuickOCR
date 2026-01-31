@@ -2,7 +2,7 @@
 
 Un utilitaire OCR portable et hors ligne pour Windows. Capturez et extrayez instantanément du texte à partir d'images, de vidéos, de jeux et d'interfaces non copiables.
 
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/440da6690beb8d3da770c440c5f69a1de2ee9437a53c991b8e56dfbc857967d0/detection)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/b0f5e4cbd0048ef9d6329f7d71e0a05cceda1d62596f63d01b0e3d1489617298/detection)
 
 ## Fonctionnalités
 * **Capture Visuelle :** Dessinez une zone sur votre écran pour capturer le texte.
