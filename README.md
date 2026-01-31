@@ -2,7 +2,7 @@
 # QuickOCR
 A portable, offline OCR utility for Windows. Instantly capture and extract text from images, videos, games, and uncopiable UI elements.
 
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/440da6690beb8d3da770c440c5f69a1de2ee9437a53c991b8e56dfbc857967d0/detection)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/b0f5e4cbd0048ef9d6329f7d71e0a05cceda1d62596f63d01b0e3d1489617298/detection)
 
 ## Features
 * **Visual Snipping:** Draw a box on your screen to capture text.
