@@ -3,6 +3,7 @@
 Un utilitaire OCR portable et hors ligne pour Windows. Capturez et extrayez instantanément du texte à partir d'images, de vidéos, de jeux et d'interfaces non copiables.
 
 [![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/b0f5e4cbd0048ef9d6329f7d71e0a05cceda1d62596f63d01b0e3d1489617298/detection)
+[![Softpedia](https://img.shields.io/badge/Softpedia-Reviewed_4.5%2F5-brightgreen)](https://www.softpedia.com/get/Office-tools/Text-editors/QuickOCR.shtml)
 
 ## Fonctionnalités
 * **Capture Visuelle :** Dessinez une zone sur votre écran pour capturer le texte.
@@ -46,6 +47,14 @@ avec une seule langue sélectionnée : préférez une langue unique à une longu
 
 ## Téléchargement
 [TÉLÉCHARGER LA DERNIÈRE VERSION](https://github.com/Wolklaw/QuickOCR/releases/latest)
+
+## Critiques
+QuickOCR a été testé par **Softpedia**, qui lui attribue la note de **4,5/5** ainsi que
+son label **Certified 100% Clean**.
+
+> "Capture text from anywhere on your screen, even on tricky or colorful backgrounds,
+> and instantly convert it into editable English or French text"
+> — [critique Softpedia par Alexandra Sava](https://www.softpedia.com/get/Office-tools/Text-editors/QuickOCR.shtml)
 
 ## Licence
 

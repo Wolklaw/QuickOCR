@@ -3,6 +3,7 @@
 A portable, offline OCR utility for Windows. Instantly capture and extract text from images, videos, games, and uncopiable UI elements.
 
 [![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/b0f5e4cbd0048ef9d6329f7d71e0a05cceda1d62596f63d01b0e3d1489617298/detection)
+[![Softpedia](https://img.shields.io/badge/Softpedia-Reviewed_4.5%2F5-brightgreen)](https://www.softpedia.com/get/Office-tools/Text-editors/QuickOCR.shtml)
 
 ## Features
 * **Visual Snipping:** Draw a box on your screen to capture text.
@@ -52,6 +53,14 @@ build.bat
 ```
 Installs the dependencies, stages the minimal Tesseract bundle and produces `dist/QuickOCR.exe`.
 Run `run_tests.bat` to execute the test suite (see [tests/README.md](tests/README.md)).
+
+## Reviews
+QuickOCR was reviewed by **Softpedia**, which rated it **4.5/5** and awarded its
+**Certified 100% Clean** badge.
+
+> "Capture text from anywhere on your screen, even on tricky or colorful backgrounds,
+> and instantly convert it into editable English or French text"
+> — [Softpedia review by Alexandra Sava](https://www.softpedia.com/get/Office-tools/Text-editors/QuickOCR.shtml)
 
 ## Legal & License
 
