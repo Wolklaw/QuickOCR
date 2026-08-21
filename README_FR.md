@@ -6,7 +6,8 @@ Un utilitaire OCR portable et hors ligne pour Windows. Capturez et extrayez inst
 
 ## Fonctionnalités
 * **Capture Visuelle :** Dessinez une zone sur votre écran pour capturer le texte.
-* **Bilingue :** Supporte l'anglais et le français simultanément (aucun réglage requis).
+* **Bilingue :** Anglais et français inclus, ensemble ou séparément.
+* **Ajoutez votre langue :** Déposez un fichier `.traineddata` Tesseract et choisissez-le dans l'application.
 * **Filtres Avancés :** Algorithmes spéciaux pour lire le texte sur des fonds bruyants ou colorés (Menus de jeux, Cartes à collectionner).
 * **Portable :** Fichier `.exe` unique. Aucune installation. Aucun droit d'administrateur.
 
@@ -16,6 +17,28 @@ Un utilitaire OCR portable et hors ligne pour Windows. Capturez et extrayez inst
 3. Cliquez sur **CAPTURE ZONE**.
 4. Encadrez le texte à capturer avec votre souris.
 5. Le texte est automatiquement copié dans votre presse-papier.
+
+Pour annuler une capture : cliquez une fois sans glisser, faites un clic droit, ou appuyez
+sur **Échap**.
+
+## Dépannage
+* **L'écran est assombri et rien ne se passe.** C'est la surface de capture. Appuyez sur
+  **Échap**, faites un clic droit, ou cliquez une fois pour la fermer.
+* **Le texte extrait est incorrect.** La fenêtre de résultat affiche un avertissement
+  lorsque Tesseract n'est pas sûr de sa lecture : vérifiez le texte avant de le coller.
+* **Le texte dans une autre langue est incorrect** (`Größe` lu `GroBe`, `niño` lu `nino`).
+  QuickOCR ne reconnaît que les langues installées. Ajoutez la langue, voir ci-dessous.
+* **Signaler un bug.** QuickOCR écrit un journal dans `%APPDATA%\QuickOCR\quickocr.log`.
+  Le joindre à un ticket aide grandement au diagnostic.
+
+## Ajouter une langue
+1. Téléchargez le fichier `.traineddata` de votre langue depuis
+   [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (par exemple `deu.traineddata`).
+2. Placez-le dans `Tesseract-OCR/tessdata/`.
+3. Sélectionnez-le dans le menu **Language** de l'application.
+
+La compilation inclut automatiquement toutes les langues présentes. Tesseract est plus précis
+avec une seule langue sélectionnée : préférez une langue unique à une longue combinaison.
 
 ## Prérequis
 * Windows 10 / 11

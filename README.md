@@ -6,7 +6,8 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 
 ## Features
 * **Visual Snipping:** Draw a box on your screen to capture text.
-* **Bilingual:** Supports English & French simultaneously.
+* **Bilingual:** Ships with English & French, read together or one at a time.
+* **Add your own language:** Drop any Tesseract `.traineddata` file in and pick it in the app.
 * **Anti-Holographic:** Special filters to read text on noisy/colored backgrounds (Game menus, Trading cards).
 * **Portable:** Single .exe file. No installation. No admin rights.
 
@@ -17,12 +18,40 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 4. Draw a box around any text.
 5. The text is automatically copied to your clipboard.
 
+To cancel a capture, click once without dragging, right-click, or press **Esc**.
+
+## Troubleshooting
+* **The screen is dimmed and nothing happens.** That is the capture overlay. Press **Esc**,
+  right-click, or click once to dismiss it.
+* **The text came out wrong.** The result popup shows a warning when Tesseract is unsure of
+  the read, so check it before pasting.
+* **Text in another language comes out garbled** (`Größe` read as `GroBe`, `niño` as `nino`).
+  QuickOCR can only recognise the languages it ships with. Add the language, see below.
+* **Reporting a bug.** QuickOCR writes a log to `%APPDATA%\QuickOCR\quickocr.log`.
+  Attaching it to an issue makes the problem far easier to track down.
+
+## Adding a language
+1. Download the `.traineddata` file for your language from
+   [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (for example `deu.traineddata`).
+2. Put it in `Tesseract-OCR/tessdata/`.
+3. Pick it from the **Language** dropdown in the app.
+
+Building from source picks up every language present automatically. Note that Tesseract is
+most accurate with one language selected, so prefer a single language over a long combination.
+
 ## Requirements
 * Windows 10/11
 * No other dependencies (Tesseract is bundled).
 
 ## Download
 [DOWNLOAD LATEST VERSION](https://github.com/Wolklaw/QuickOCR/releases/latest)
+
+## Building from source
+```bat
+build.bat
+```
+Installs the dependencies, stages the minimal Tesseract bundle and produces `dist/QuickOCR.exe`.
+Run `run_tests.bat` to execute the test suite (see [tests/README.md](tests/README.md)).
 
 ## Legal & License
 
