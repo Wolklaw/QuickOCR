@@ -11,6 +11,7 @@ import logging
 import tempfile
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from tkinter import messagebox
@@ -18,11 +19,12 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import pytesseract
 import pyperclip
-from PIL import ImageGrab, Image, ImageOps
+from PIL import ImageDraw, ImageGrab, Image, ImageOps, ImageTk
 from pytesseract import Output
 
 APP_NAME = "QuickOCR"
-VERSION = "1.1.1"
+VERSION = "1.2.0"
+ICON_FILENAME = "quickocr.ico"
 CONFIG_FILENAME = "config.json"
 LOG_FILENAME = "quickocr.log"
 
@@ -37,20 +39,33 @@ UPSCALE_PIXEL_CAP = 12_000_000
 GRAB_DELAY_MS = 80          # let the desktop repaint after hiding the overlay
 OVERLAY_POLL_MS = 400       # how often the overlay checks that it still owns the screen
 OVERLAY_MAX_SECONDS = 120   # hard ceiling on how long the overlay may cover the desktop
-WINDOW_W, WINDOW_H = 300, 190
+WINDOW_W, WINDOW_H = 340, 236
+POPUP_W, POPUP_H = 420, 252
+POPUP_SECONDS = 10
 
 THEME = {
-    "bg_main":    "#1e1e1e",
-    "bg_header":  "#252526",
-    "fg_text":    "#cccccc",
-    "accent":     "#007acc",
-    "accent_hov": "#0098ff",
-    "close_hov":  "#e81123",
-    "min_hov":    "#3e3e42",
-    "success":    "#4cc790",
-    "warning":    "#e0a030",
-    "instruction":"#888888"
+    "bg":           "#18181b",
+    "surface":      "#232329",
+    "surface_hov":  "#2d2d35",
+    "border":       "#34343d",
+    "fg":           "#ececf1",
+    "muted":        "#9d9da8",
+    "subtle":       "#6c6c77",
+    "accent":       "#3b82f6",
+    "accent_hov":   "#5593ff",
+    "accent_press": "#2a6ce0",
+    "accent_off":   "#2a3f63",
+    "close_hov":    "#e81123",
+    "success":      "#34d399",
+    "warning":      "#f5a524",
 }
+
+FONT_UI = "Segoe UI"
+FONT_SEMIBOLD = "Segoe UI Semibold"
+FONT_MONO = "Consolas"
+FONT_GLYPH = "Segoe MDL2 Assets"     # ships with Windows 10 and 11
+GLYPH_CLOSE, GLYPH_MINIMIZE, GLYPH_CHEVRON = "", "", ""
+GLYPH_CHECK, GLYPH_WARNING, GLYPH_CAPTURE = "", "", ""
 
 GWL_EXSTYLE = -20
 WS_EX_APPWINDOW = 0x00040000
@@ -59,6 +74,8 @@ SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 MONITOR_DEFAULTTONEAREST = 2
+DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
+DWMWA_BORDER_COLOR = 34
 
 log = logging.getLogger(APP_NAME)
 
@@ -267,6 +284,143 @@ def force_taskbar_visibility(root_window: tk.Tk):
         root_window.after(10, root_window.deiconify)
     except (AttributeError, OSError, tk.TclError):
         log.exception("could not update the taskbar style")
+
+
+def apply_window_chrome(window: tk.Misc) -> bool:
+    """Rounded corners and a hairline border on Windows 11, like a native window.
+
+    A borderless window otherwise has square corners and no edge, which reads as unfinished.
+    Returns False where Windows does not support it (Windows 10), so the caller can keep
+    drawing its own 1px border instead.
+    """
+    if os.name != 'nt':
+        return False
+    try:
+        window.update_idletasks()
+        hwnd = wintypes.HWND(toplevel_hwnd(window))
+        dwm = ctypes.windll.dwmapi
+        corner = ctypes.c_int(DWMWCP_ROUND)
+        rounded = dwm.DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                                            ctypes.byref(corner), ctypes.sizeof(corner))
+        red, green, blue = (int(THEME["border"][i:i + 2], 16) for i in (1, 3, 5))
+        colour = wintypes.DWORD(red | green << 8 | blue << 16)       # COLORREF is 0x00BBGGRR
+        bordered = dwm.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR,
+                                             ctypes.byref(colour), ctypes.sizeof(colour))
+        return rounded == 0 and bordered == 0                         # S_OK
+    except (AttributeError, OSError, tk.TclError):
+        log.info("window chrome not available on this system")
+        return False
+
+
+def rounded_image(master: tk.Misc, width: int, height: int, radius: float, fill: str,
+                  background: str) -> ImageTk.PhotoImage:
+    """An anti-aliased rounded rectangle. Tk's canvas draws curves with jagged edges."""
+    k = 4
+    image = Image.new('RGB', (width * k, height * k), background)
+    ImageDraw.Draw(image).rounded_rectangle(
+        (0, 0, width * k - 1, height * k - 1), radius=radius * k, fill=fill)
+    return ImageTk.PhotoImage(image.resize((width, height), Image.Resampling.LANCZOS),
+                              master=master)
+
+
+def icon_image(master: tk.Misc, size: int) -> Optional[ImageTk.PhotoImage]:
+    try:
+        with Image.open(get_resource_path(ICON_FILENAME)) as icon:
+            icon.size = max(icon.info.get('sizes', {icon.size}))
+            icon.load()
+            frame = icon.convert('RGBA').resize((size, size), Image.Resampling.LANCZOS)
+        return ImageTk.PhotoImage(frame, master=master)
+    except (OSError, ValueError):
+        log.exception("could not load the icon image")
+        return None
+
+
+class RoundedButton(tk.Canvas):
+    """A flat button with rounded corners and hover, press and disabled states."""
+
+    def __init__(self, parent: tk.Misc, text: str, command: Callable[[], None],
+                 width: int, height: int, background: str, glyph: str = "",
+                 primary: bool = True, font_size: int = 10, glyph_after: bool = False):
+        super().__init__(parent, width=width, height=height, bg=background,
+                         highlightthickness=0, bd=0, cursor="hand2")
+        self._command = command
+        self._glyph_after = glyph_after
+        self._enabled = True
+        self._hover = self._pressed = False
+        self._width, self._height = width, height
+        if primary:
+            palette = (THEME["accent"], THEME["accent_hov"], THEME["accent_press"],
+                       THEME["accent_off"])
+            self._fg, self._fg_off = "#ffffff", "#9fb3d6"
+        else:
+            palette = (THEME["surface"], THEME["surface_hov"], THEME["border"],
+                       THEME["surface"])
+            self._fg, self._fg_off = THEME["fg"], THEME["subtle"]
+        radius = min(height / 2, 8 * height / 36)
+        self._images = {state: rounded_image(self, width, height, radius, colour, background)
+                        for state, colour in zip(('normal', 'hover', 'pressed', 'disabled'),
+                                                 palette)}
+        self._shape = self.create_image(0, 0, anchor='nw', image=self._images['normal'])
+
+        self._font = tkfont.Font(self, family=FONT_SEMIBOLD, size=font_size)
+        self._glyph_font = tkfont.Font(self, family=FONT_GLYPH,
+                                       size=font_size - 2 if glyph_after else font_size + 1)
+        self._glyph = self.create_text(0, height / 2, text=glyph, anchor='w',
+                                       font=self._glyph_font, fill=self._fg)
+        self._label = self.create_text(0, height / 2, text=text, anchor='w',
+                                       font=self._font, fill=self._fg)
+        self._layout()
+
+        self.bind("<Enter>", lambda _e: self._set(hover=True))
+        self.bind("<Leave>", lambda _e: self._set(hover=False))
+        self.bind("<ButtonPress-1>", lambda _e: self._set(pressed=True))
+        self.bind("<ButtonRelease-1>", self._on_release)
+
+    def _layout(self):
+        glyph = self.itemcget(self._glyph, 'text')
+        text_w = self._font.measure(self.itemcget(self._label, 'text'))
+        glyph_w = self._glyph_font.measure(glyph) if glyph else 0
+        gap = int(self._font.measure(' ') * 1.6) if glyph else 0
+        x = (self._width - glyph_w - gap - text_w) / 2
+        if self._glyph_after:
+            self.coords(self._label, x, self._height / 2)
+            self.coords(self._glyph, x + text_w + gap, self._height / 2 + 1)
+        else:
+            self.coords(self._glyph, x, self._height / 2 + 1)
+            self.coords(self._label, x + glyph_w + gap, self._height / 2)
+
+    def _set(self, hover=None, pressed=None):
+        if hover is not None:
+            self._hover = hover
+        if pressed is not None:
+            self._pressed = pressed
+        if not self._enabled:
+            state = 'disabled'
+        elif self._pressed and self._hover:
+            state = 'pressed'
+        else:
+            state = 'hover' if self._hover else 'normal'
+        self.itemconfigure(self._shape, image=self._images[state])
+        colour = self._fg if self._enabled else self._fg_off
+        self.itemconfigure(self._label, fill=colour)
+        self.itemconfigure(self._glyph, fill=colour)
+
+    def _on_release(self, _event):
+        fire = self._pressed and self._hover and self._enabled
+        self._set(pressed=False)
+        if fire:
+            self._command()
+
+    def set_state(self, text: Optional[str] = None, enabled: bool = True,
+                  glyph: Optional[str] = None):
+        if text is not None:
+            self.itemconfigure(self._label, text=text)
+        if glyph is not None:
+            self.itemconfigure(self._glyph, text=glyph)
+        self._enabled = enabled
+        self.configure(cursor="hand2" if enabled else "watch")
+        self._layout()
+        self._set()
 
 
 class ConfigManager:
@@ -680,88 +834,236 @@ class SnippingOverlay(tk.Toplevel):
             callback(image)
 
 
-class ResultPopup(tk.Toplevel):
-    def __init__(self, parent, result: OCRResult, timeout: int = 10):
-        super().__init__(parent)
+LANGUAGE_NAMES = {
+    'eng': "English", 'fra': "French", 'deu': "German", 'spa': "Spanish", 'ita': "Italian",
+    'por': "Portuguese", 'nld': "Dutch", 'pol': "Polish", 'rus': "Russian", 'ukr': "Ukrainian",
+    'tur': "Turkish", 'swe': "Swedish", 'dan': "Danish", 'nor': "Norwegian", 'fin': "Finnish",
+    'ces': "Czech", 'ell': "Greek", 'ara': "Arabic", 'heb': "Hebrew", 'hin': "Hindi",
+    'jpn': "Japanese", 'kor': "Korean", 'chi_sim': "Chinese (Simplified)",
+    'chi_tra': "Chinese (Traditional)", 'vie': "Vietnamese",
+}
+
+
+def language_label(lang: str) -> str:
+    """'eng+fra' -> 'English + French'; unknown codes are shown as they are."""
+    return " + ".join(LANGUAGE_NAMES.get(part, part) for part in lang.split('+'))
+
+
+def blend(colour: str, background: str, amount: float) -> str:
+    """colour laid over background at the given opacity."""
+    fg = [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
+    bg = [int(background[i:i + 2], 16) for i in (1, 3, 5)]
+    return '#%02x%02x%02x' % tuple(round(b + (f - b) * amount) for f, b in zip(fg, bg))
+
+
+class Dropdown(tk.Toplevel):
+    """A themed list of choices under a button. Windows draws tk.Menu natively - white
+    border, system colours - which clashes with the rest of the window."""
+
+    def __init__(self, anchor: tk.Misc, choices: List[Tuple[str, str]], current: str,
+                 on_pick: Callable[[str], None], scale: float):
+        super().__init__(anchor)
+        self.withdraw()
         self.overrideredirect(True)
-        self.configure(bg=THEME["bg_main"])
         self.attributes('-topmost', True)
+        self.configure(bg=THEME["border"])
+        self._on_pick = on_pick
+        surface, padding = THEME["surface"], int(round(4 * scale))
+
+        body = tk.Frame(self, bg=surface)
+        body.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        inner = tk.Frame(body, bg=surface)
+        inner.pack(fill=tk.BOTH, expand=True, padx=padding, pady=padding)
+        for value, label in choices:
+            self._add_row(inner, value, label, value == current, scale)
+
+        self.update_idletasks()
+        width = max(self.winfo_reqwidth(), anchor.winfo_width())
+        self.geometry(f"{width}x{self.winfo_reqheight()}"
+                      f"+{anchor.winfo_rootx() + anchor.winfo_width() - width}"
+                      f"+{anchor.winfo_rooty() + anchor.winfo_height() + padding}")
+        self.deiconify()
+        if apply_window_chrome(self):
+            body.pack_configure(padx=0, pady=0)
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.bind("<FocusOut>", self._on_focus_out)
+        self.focus_force()
+
+    def _add_row(self, parent: tk.Misc, value: str, label: str, selected: bool, scale: float):
+        surface = THEME["surface"]
+        row = tk.Frame(parent, bg=surface, cursor="hand2")
+        row.pack(fill=tk.X)
+        check = tk.Label(row, text=GLYPH_CHECK if selected else "", font=(FONT_GLYPH, 8),
+                         width=2, bg=surface, fg=THEME["accent"])
+        check.pack(side=tk.LEFT, padx=(int(6 * scale), 0))
+        text = tk.Label(row, text=label, font=(FONT_UI, 9), anchor='w', bg=surface,
+                        fg=THEME["fg"], padx=int(6 * scale), pady=int(5 * scale))
+        text.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, int(18 * scale)))
+        parts = (row, check, text)
+
+        def paint(colour):
+            for part in parts:
+                part.configure(bg=colour)
+        for part in parts:
+            part.bind("<Enter>", lambda _e: paint(THEME["surface_hov"]))
+            part.bind("<Leave>", lambda _e: paint(surface))
+            part.bind("<ButtonRelease-1>", lambda _e: self._pick(value))
+
+    def _pick(self, value: str):
+        self.destroy()
+        self._on_pick(value)
+
+    def _on_focus_out(self, _event):
+        # focus moving between our own rows also fires FocusOut; close only once it has
+        # gone somewhere else - the main window, another app, the desktop
+        self.after(1, self._close_unless_focused)
+
+    def _close_unless_focused(self):
+        try:
+            if not self.winfo_exists():
+                return
+            focused = self.focus_get()
+            if focused is None or focused.winfo_toplevel() is not self:
+                self.destroy()
+        except (tk.TclError, KeyError):
+            self.destroy()
+
+
+class ResultPopup(tk.Toplevel):
+    """Confirms the copy and previews the text, then gets out of the way by itself.
+
+    The countdown pauses while the pointer is over the popup, so it never closes on
+    someone who is still reading it.
+    """
+
+    PREVIEW_LINES = 4
+    TICK_MS = 50
+
+    def __init__(self, parent, result: OCRResult, timeout: int = POPUP_SECONDS):
+        super().__init__(parent)
+        self.withdraw()                      # build first, then show at the right size
+        self.overrideredirect(True)
+        self.attributes('-topmost', True)
+        self.configure(bg=THEME["border"])
+        self._timeout = float(timeout)
+        self._elapsed = 0.0
 
         scale = dpi_scale(self)
-        w, h = int(400 * scale), int(260 * scale)
+
+        def px(value: float) -> int:
+            return int(round(value * scale))
+
+        bg = THEME["bg"]
+        width = px(POPUP_W)
+        self.body = tk.Frame(self, bg=bg)
+        self.body.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        if result.confidence < CONF_WARN:
+            glyph, colour = GLYPH_WARNING, THEME["warning"]
+            headline = "Copied, but check the text"
+            subtitle = f"Tesseract is only {result.confidence:.0f}% sure of this read."
+        else:
+            glyph, colour = GLYPH_CHECK, THEME["success"]
+            headline = "Copied to clipboard"
+            subtitle = "Press Ctrl+V to paste it anywhere."
+
+        # countdown bar along the bottom edge, packed first so it stays lowest
+        self.bar = tk.Canvas(self.body, height=px(3), bg=bg, highlightthickness=0, bd=0)
+        self.bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self._bar_fill = self.bar.create_rectangle(0, 0, width, px(3), width=0,
+                                                   fill=THEME["accent"])
+
+        footer = tk.Frame(self.body, bg=bg)
+        footer.pack(side=tk.BOTTOM, fill=tk.X, padx=px(20), pady=(px(14), px(14)))
+        RoundedButton(footer, "Done", self.destroy, width=px(88), height=px(32),
+                      background=bg, font_size=9).pack(side=tk.RIGHT)
+        words = len(result.text.split())
+        tk.Label(footer, text=f"{words} word{'s' if words != 1 else ''}  ·  "
+                              f"{result.confidence:.0f}% confidence",
+                 font=(FONT_UI, 8), bg=bg, fg=THEME["subtle"]).pack(side=tk.LEFT)
+
+        header = tk.Frame(self.body, bg=bg)
+        header.pack(fill=tk.X, padx=px(20), pady=(px(18), px(12)))
+        badge = tk.Canvas(header, width=px(36), height=px(36), bg=bg,
+                          highlightthickness=0, bd=0)
+        self._badge = rounded_image(badge, px(36), px(36), px(18), blend(colour, bg, 0.16), bg)
+        badge.create_image(0, 0, anchor='nw', image=self._badge)
+        badge.create_text(px(18), px(18) + 1, text=glyph, font=(FONT_GLYPH, 12), fill=colour)
+        badge.pack(side=tk.LEFT)
+        titles = tk.Frame(header, bg=bg)
+        titles.pack(side=tk.LEFT, fill=tk.X, padx=(px(12), 0))
+        tk.Label(titles, text=headline, font=(FONT_SEMIBOLD, 12), bg=bg, fg=THEME["fg"],
+                 anchor='w').pack(fill=tk.X)
+        tk.Label(titles, text=subtitle, font=(FONT_UI, 9), bg=bg, fg=THEME["muted"],
+                 anchor='w').pack(fill=tk.X)
+
+        panel = tk.Frame(self.body, bg=THEME["surface"])
+        panel.pack(fill=tk.X, padx=px(20))
+        mono = tkfont.Font(self, family=FONT_MONO, size=9)
+        columns = max(10, (width - px(64)) // max(1, mono.measure('0')))
+        tk.Label(panel, text=self._preview(result.text, columns), font=mono,
+                 bg=THEME["surface"], fg=THEME["fg"], justify=tk.LEFT,
+                 anchor='nw').pack(fill=tk.X, padx=px(12), pady=px(10))
+
+        self.update_idletasks()
+        height = self.winfo_reqheight()
         # centre on the monitor where the snip was taken, not always on the primary one
         left, top, right, bottom = monitor_at_cursor(work_area=True)
-        x = left + max(0, (right - left - w) // 2)
-        y = top + max(0, (bottom - top - h) // 2)
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        x = left + max(0, (right - left - width) // 2)
+        y = top + max(0, (bottom - top - height) // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.deiconify()
+        if apply_window_chrome(self):
+            self.body.pack_configure(padx=0, pady=0)
+        self.after(self.TICK_MS, self._tick)
 
-        unreliable = result.confidence < CONF_WARN
-        frame = tk.Frame(self, bg=THEME["bg_main"],
-                         highlightbackground=THEME["warning"] if unreliable else THEME["accent"],
-                         highlightthickness=1)
-        frame.pack(fill=tk.BOTH, expand=True)
+    @classmethod
+    def _preview(cls, text: str, columns: int) -> str:
+        lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+        shown = [line if len(line) <= columns else line[:columns - 1] + "…"
+                 for line in lines[:cls.PREVIEW_LINES]]
+        hidden = len(lines) - len(shown)
+        if hidden > 0:
+            shown[-1] = f"… and {hidden + 1} more lines"
+        return "\n".join(shown)
 
-        if unreliable:
-            headline, colour = "! COPIED - LOW CONFIDENCE", THEME["warning"]
-            subtitle = (f"Tesseract is only {result.confidence:.0f}% sure. "
-                        "Check the text before you use it.")
-        else:
-            headline, colour = "✓ COPIED TO CLIPBOARD", THEME["success"]
-            subtitle = "Press Ctrl+V to paste"
+    def _pointer_inside(self) -> bool:
+        x, y = self.winfo_pointerxy()
+        return (self.winfo_rootx() <= x < self.winfo_rootx() + self.winfo_width()
+                and self.winfo_rooty() <= y < self.winfo_rooty() + self.winfo_height())
 
-        tk.Label(frame, text=headline, font=("Segoe UI", 11, "bold"),
-                 bg=THEME["bg_main"], fg=colour).pack(pady=(15, 2))
-        tk.Label(frame, text=subtitle, font=("Segoe UI", 9), wraplength=int(360 * scale),
-                 bg=THEME["bg_main"], fg=THEME["instruction"]).pack(pady=(0, 10))
-
-        preview = result.text.replace('\n', ' ')
-        if len(preview) > 150:
-            preview = preview[:150] + "..."
-
-        tk.Label(
-            frame, text=preview, font=("Consolas", 9),
-            bg=THEME["bg_header"], fg=THEME["fg_text"],
-            wraplength=int(360 * scale), justify="left", padx=10, pady=10
-        ).pack(fill=tk.X, padx=20)
-
-        self.lbl_timer = tk.Label(
-            frame, text=f"Auto-closing in {timeout}s",
-            font=("Segoe UI", 8), bg=THEME["bg_main"], fg="#666"
-        )
-        self.lbl_timer.pack(pady=(10, 5))
-
-        tk.Button(
-            frame, text="OK", command=self.destroy,
-            bg=THEME["accent"], fg="white",
-            activebackground=THEME["accent_hov"], activeforeground="white",
-            bd=0, padx=25, pady=4, cursor="hand2"
-        ).pack(pady=10)
-
-        self._start_timer(timeout)
-
-    def _start_timer(self, remaining: int):
-        if not self.winfo_exists():
-            return
-        if remaining > 0:
-            self.lbl_timer.config(text=f"Closing in {remaining}s")
-            self.after(1000, lambda: self._start_timer(remaining - 1))
-        else:
-            self.destroy()
+    def _tick(self):
+        try:
+            if not self.winfo_exists():
+                return
+            if not self._pointer_inside():
+                self._elapsed += self.TICK_MS / 1000
+            if self._elapsed >= self._timeout:
+                self.destroy()
+                return
+            remaining = 1 - self._elapsed / self._timeout
+            self.bar.coords(self._bar_fill, 0, 0, self.bar.winfo_width() * remaining,
+                            self.bar.winfo_height())
+            self.after(self.TICK_MS, self._tick)
+        except tk.TclError:
+            pass                                 # destroyed between ticks
 
 
 class App:
     def __init__(self):
         self.root = tk.Tk()
+        self.root.withdraw()                 # no half-built flash while the UI is assembled
         self.root.overrideredirect(True)
-        self.root.configure(bg=THEME["bg_main"])
+        self.root.configure(bg=THEME["border"])
+        self.root.title(APP_NAME)
         self.root.report_callback_exception = self._on_tk_error
         # closing from the taskbar while minimized must still save the config
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         try:
-            icon_path = get_resource_path("aa.ico")
+            icon_path = get_resource_path(ICON_FILENAME)
             if os.path.exists(icon_path):
-                self.root.iconbitmap(icon_path)
+                self.root.iconbitmap(default=icon_path)   # default: dialogs inherit it too
         except tk.TclError:
             log.exception("could not load the window icon")
 
@@ -771,12 +1073,24 @@ class App:
         self.results: "queue.Queue[Tuple[str, Any]]" = queue.Queue()
         self.busy = False
         self.popup: Optional[ResultPopup] = None
+        self._drag_offset: Optional[Tuple[int, int]] = None
 
         self._setup_window_geometry()
+        self.frame = tk.Frame(self.root, bg=THEME["bg"])
+        self.frame.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
         self._build_custom_titlebar()
         self._build_main_ui()
 
-        self.root.after(10, lambda: force_taskbar_visibility(self.root))
+        self.root.deiconify()
+        self.root.after(10, self._apply_chrome)
+
+    def _px(self, value: float) -> int:
+        return int(round(value * getattr(self, 'scale', 1.0)))
+
+    def _apply_chrome(self):
+        force_taskbar_visibility(self.root)
+        if apply_window_chrome(self.root):
+            self.frame.pack_configure(padx=0, pady=0)     # Windows draws the border itself
 
     def _on_tk_error(self, exc_type, exc_value, exc_tb):
         # in a --noconsole build these would otherwise vanish silently
@@ -784,7 +1098,7 @@ class App:
         messagebox.showerror(APP_NAME, f"Unexpected error:\n{exc_value}")
 
     def _setup_window_geometry(self):
-        scale = dpi_scale(self.root)
+        scale = self.scale = dpi_scale(self.root)
         try:
             self.root.tk.call('tk', 'scaling', 96.0 * scale / 72.0)
         except tk.TclError:
@@ -800,89 +1114,126 @@ class App:
         y = max(v_y, min(int(y), v_y + v_height - h))
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
+    def _drag_handle(self, *widgets: tk.Misc):
+        for widget in widgets:
+            widget.bind("<Button-1>", self._start_move)
+            widget.bind("<B1-Motion>", self._do_move)
+
     def _build_custom_titlebar(self):
-        self.title_bar = tk.Frame(self.root, bg=THEME["bg_header"], height=30)
+        px, bg = self._px, THEME["bg"]
+        self.title_bar = tk.Frame(self.frame, bg=bg, height=px(40))
         self.title_bar.pack(fill=tk.X, side=tk.TOP)
         self.title_bar.pack_propagate(False)
+        handles: List[tk.Misc] = [self.title_bar]
 
-        self.title_bar.bind("<Button-1>", self._start_move)
-        self.title_bar.bind("<B1-Motion>", self._do_move)
+        self._title_icon = icon_image(self.root, px(18))
+        if self._title_icon is not None:
+            icon = tk.Label(self.title_bar, image=self._title_icon, bg=bg)
+            icon.pack(side=tk.LEFT, padx=(px(14), px(8)))
+            handles.append(icon)
+        title = tk.Label(self.title_bar, text=APP_NAME, font=(FONT_SEMIBOLD, 10),
+                         bg=bg, fg=THEME["fg"])
+        title.pack(side=tk.LEFT, padx=(0 if self._title_icon else px(14), px(6)))
+        version = tk.Label(self.title_bar, text=f"v{VERSION}", font=(FONT_UI, 8),
+                           bg=bg, fg=THEME["subtle"])
+        version.pack(side=tk.LEFT, pady=(px(2), 0))
+        handles += [title, version]
+        self._drag_handle(*handles)
 
-        title = tk.Label(
-            self.title_bar, text=f"{APP_NAME}",
-            bg=THEME["bg_header"], fg=THEME["fg_text"], font=("Segoe UI", 9, "bold")
-        )
-        title.pack(side=tk.LEFT, padx=10)
-        # the label sits on the bar, so it has to be a drag handle too
-        title.bind("<Button-1>", self._start_move)
-        title.bind("<B1-Motion>", self._do_move)
+        self._titlebar_button(GLYPH_CLOSE, self._on_close, THEME["close_hov"])
+        self._titlebar_button(GLYPH_MINIMIZE, self._minimize, THEME["surface_hov"])
 
-        self._create_titlebar_btn("✕", self._on_close, THEME["close_hov"])
-        self._create_titlebar_btn("—", self._minimize, THEME["min_hov"])
+    def _titlebar_button(self, glyph: str, command: Callable[[], None], hover: str):
+        bg = THEME["bg"]
+        button = tk.Label(self.title_bar, text=glyph, font=(FONT_GLYPH, 8), bg=bg,
+                          fg=THEME["muted"], padx=self._px(16))
+        button.pack(side=tk.RIGHT, fill=tk.Y)
+        button.bind("<Enter>", lambda _e: button.config(bg=hover, fg="#ffffff"))
+        button.bind("<Leave>", lambda _e: button.config(bg=bg, fg=THEME["muted"]))
 
-    def _create_titlebar_btn(self, text, command, hover_color):
-        btn = tk.Button(
-            self.title_bar, text=text, command=command,
-            bg=THEME["bg_header"], fg=THEME["fg_text"],
-            bd=0, font=("Arial", 9, "bold"), width=4,
-            activebackground=hover_color, activeforeground="white"
-        )
-        btn.pack(side=tk.RIGHT, fill=tk.Y)
+        def release(event):
+            if 0 <= event.x < button.winfo_width() and 0 <= event.y < button.winfo_height():
+                command()
+        button.bind("<ButtonRelease-1>", release)
 
     def _build_main_ui(self):
-        main_frame = tk.Frame(self.root, bg=THEME["bg_main"])
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        main_frame.bind("<Button-1>", self._start_move)
-        main_frame.bind("<B1-Motion>", self._do_move)
+        px, bg = self._px, THEME["bg"]
+        main = tk.Frame(self.frame, bg=bg)
+        main.pack(fill=tk.BOTH, expand=True, padx=px(20))
 
-        self.capture_btn = tk.Button(
-            main_frame, text="CAPTURE ZONE", command=self._start_snip,
-            font=("Segoe UI", 10, "bold"), bg=THEME["accent"], fg="white",
-            activebackground=THEME["accent_hov"], activeforeground="white",
-            bd=0, cursor="hand2", padx=20, pady=10
-        )
-        self.capture_btn.place(relx=0.5, rely=0.42, anchor=tk.CENTER)
+        footer = tk.Frame(main, bg=bg)
+        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, px(14)))
+        tk.Frame(main, bg=THEME["border"], height=1).pack(side=tk.BOTTOM, fill=tk.X,
+                                                          pady=(0, px(12)))
 
-        self._build_language_picker(main_frame)
+        content = tk.Frame(main, bg=bg)
+        content.pack(expand=True)
+        self.capture_btn = RoundedButton(
+            content, "Capture text", self._start_snip, width=px(WINDOW_W - 40),
+            height=px(46), background=bg, glyph=GLYPH_CAPTURE, font_size=11)
+        self.capture_btn.pack()
+        hint = tk.Label(content, text="Drag a box around any text  ·  Esc cancels",
+                        font=(FONT_UI, 9), bg=bg, fg=THEME["muted"])
+        hint.pack(pady=(px(10), 0))
+        self._drag_handle(main, content, hint, footer)
+
+        self._build_language_picker(footer)
 
     def _build_language_picker(self, parent):
+        px, bg = self._px, THEME["bg"]
         choices = self.ocr.language_choices()
-        row = tk.Frame(parent, bg=THEME["bg_main"])
-        row.place(relx=0.5, rely=0.82, anchor=tk.CENTER)
-
-        tk.Label(row, text="Language", font=("Segoe UI", 8), bg=THEME["bg_main"],
-                 fg=THEME["instruction"]).pack(side=tk.LEFT, padx=(0, 6))
+        label = tk.Label(parent, text="Language", font=(FONT_UI, 9), bg=bg, fg=THEME["muted"])
+        label.pack(side=tk.LEFT)
+        self._drag_handle(label)
 
         if not choices:
-            tk.Label(row, text="no language data found", font=("Segoe UI", 8, "bold"),
-                     bg=THEME["bg_main"], fg=THEME["warning"]).pack(side=tk.LEFT)
+            tk.Label(parent, text="no language data found", font=(FONT_SEMIBOLD, 9),
+                     bg=bg, fg=THEME["warning"]).pack(side=tk.RIGHT)
             return
 
-        self.lang_var = tk.StringVar(value=self.ocr.lang)
-        picker = tk.OptionMenu(row, self.lang_var, *choices, command=self._on_language_change)
-        picker.config(font=("Segoe UI", 8), bg=THEME["bg_header"], fg=THEME["fg_text"],
-                      activebackground=THEME["min_hov"], activeforeground="white",
-                      bd=0, highlightthickness=0, cursor="hand2", padx=8, pady=2)
-        picker["menu"].config(bg=THEME["bg_header"], fg=THEME["fg_text"],
-                              activebackground=THEME["accent"], bd=0)
-        picker.pack(side=tk.LEFT)
+        self.lang_choices = [(code, language_label(code)) for code in choices]
+        self.lang_dropdown: Optional[Dropdown] = None
+        self._dropdown_closed_at = 0.0
+
+        measure = tkfont.Font(self.root, family=FONT_SEMIBOLD, size=9).measure
+        widest = max(measure(language_label(code)) for code in choices)
+        self.lang_button = RoundedButton(
+            parent, language_label(self.ocr.lang), self._show_language_menu,
+            width=widest + px(48), height=px(28), background=bg, glyph=GLYPH_CHEVRON,
+            primary=False, font_size=9, glyph_after=True)
+        self.lang_button.pack(side=tk.RIGHT)
+
+    def _show_language_menu(self):
+        # clicking the button while the list is open closes it via focus-out first;
+        # don't reopen it straight away, so the button toggles
+        if time.monotonic() - self._dropdown_closed_at < 0.25:
+            return
+        self.lang_dropdown = Dropdown(self.lang_button, self.lang_choices, self.ocr.lang,
+                                      self._on_language_change, self.scale)
+        self.lang_dropdown.bind("<Destroy>", self._on_dropdown_closed, add='+')
+
+    def _on_dropdown_closed(self, event):
+        if event.widget is self.lang_dropdown:
+            self.lang_dropdown = None
+            self._dropdown_closed_at = time.monotonic()
 
     def _on_language_change(self, value: str):
         self.ocr.lang = value
         self.config["lang"] = value
         ConfigManager.save(self.config)
+        if hasattr(self, 'lang_button'):
+            self.lang_button.set_state(text=language_label(value))
         log.info("language set to %s", value)
 
     def _start_move(self, event):
-        self.last_x = event.x
-        self.last_y = event.y
+        self._drag_offset = (event.x_root - self.root.winfo_x(),
+                             event.y_root - self.root.winfo_y())
 
     def _do_move(self, event):
-        deltax = event.x - self.last_x
-        deltay = event.y - self.last_y
-        x = self.root.winfo_x() + deltax
-        y = self.root.winfo_y() + deltay
-        self.root.geometry(f"+{x}+{y}")
+        if self._drag_offset is None:
+            return
+        dx, dy = self._drag_offset
+        self.root.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
 
     def _minimize(self):
         self.root.overrideredirect(False)
@@ -895,7 +1246,7 @@ class App:
         if self.root.state() == 'normal':
             self.root.overrideredirect(True)
             self.root.unbind("<Map>")
-            force_taskbar_visibility(self.root)
+            self._apply_chrome()
 
     def _on_close(self):
         # a minimized window sits at (-32000, -32000); keep the last real position instead
@@ -910,11 +1261,8 @@ class App:
 
     def _set_busy(self, busy: bool):
         self.busy = busy
-        self.capture_btn.config(
-            text="READING..." if busy else "CAPTURE ZONE",
-            state=tk.DISABLED if busy else tk.NORMAL,
-            cursor="watch" if busy else "hand2"
-        )
+        self.capture_btn.set_state(text="Reading text…" if busy else "Capture text",
+                                   enabled=not busy)
 
     def _start_snip(self):
         if self.busy:

@@ -1,9 +1,17 @@
+<img src="icon.png" width="80" alt="Icône de QuickOCR">
+
 # QuickOCR (Version Française)
 
 Un utilitaire OCR portable et hors ligne pour Windows. Capturez et extrayez instantanément du texte à partir d'images, de vidéos, de jeux et d'interfaces non copiables.
 
 [![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/b0f5e4cbd0048ef9d6329f7d71e0a05cceda1d62596f63d01b0e3d1489617298/detection)
 [![Softpedia](https://img.shields.io/badge/Softpedia-Reviewed_4.5%2F5-brightgreen)](https://www.softpedia.com/get/Office-tools/Text-editors/QuickOCR.shtml)
+
+> **Fin de vie.** La version 1.2.0 est la dernière. L'Outil Capture d'écran de Windows sait
+> désormais copier le texte d'une capture (*Actions de texte*, Windows 11), ce qui couvre l'essentiel
+> de ce que fait QuickOCR : j'ai terminé cette version pour clore le projet. QuickOCR fonctionne
+> toujours et reste disponible, mais aucune mise à jour ni aucun support ne sont prévus.
+> Voir le [journal des modifications](CHANGELOG.md) (en anglais).
 
 ## Fonctionnalités
 * **Capture Visuelle :** Dessinez une zone sur votre écran pour capturer le texte.
@@ -15,7 +23,7 @@ Un utilitaire OCR portable et hors ligne pour Windows. Capturez et extrayez inst
 ## Utilisation
 1. Téléchargez `QuickOCR.exe` via le lien ci-dessous.
 2. Lancez `QuickOCR.exe` (C'est un fichier unique, sans installation).
-3. Cliquez sur **CAPTURE ZONE**.
+3. Cliquez sur **Capture text**.
 4. Encadrez le texte à capturer avec votre souris.
 5. Le texte est automatiquement copié dans votre presse-papier.
 

@@ -10,13 +10,16 @@ Run directly to see what would be staged:  py make_bundle.py
 """
 
 import os
+import re
 import shutil
+import stat
 import struct
 import sys
 
-SOURCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Tesseract-OCR')
-STAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         'build', 'bundle', 'Tesseract-OCR')
+HERE = os.path.dirname(os.path.abspath(__file__))
+SOURCE_DIR = os.path.join(HERE, 'Tesseract-OCR')
+STAGE_DIR = os.path.join(HERE, 'build', 'bundle', 'Tesseract-OCR')
+VERSION_FILE = os.path.join(HERE, 'build', 'version_info.txt')
 # osd is orientation detection, which QuickOCR never asks for (it always passes --psm 6)
 SKIP_LANGUAGES = ('osd.traineddata',)
 
@@ -90,13 +93,66 @@ def required_files():
     return ['tesseract.exe'] + sorted(available[key] for key in needed)
 
 
+def remove_tree(path):
+    """rmtree that copes with read-only entries. copytree copies the read-only flag of
+    tessdata/configs, and Windows refuses to delete a read-only folder, so every build after
+    the first one failed."""
+    def make_writable_and_retry(function, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=make_writable_and_retry)
+    else:
+        shutil.rmtree(path, onerror=make_writable_and_retry)
+
+
+def write_version_info():
+    """The exe's Properties > Details tab and Task Manager read this. Without it the exe
+    shows no name, version or publisher, which looks like malware."""
+    with open(os.path.join(HERE, 'quickocr.py'), encoding='utf-8') as handle:
+        match = re.search(r'^VERSION = "(\d+)\.(\d+)\.(\d+)"', handle.read(), re.M)
+    if not match:
+        sys.exit("could not find VERSION in quickocr.py")
+    numbers = tuple(int(part) for part in match.groups()) + (0,)
+    version = '.'.join(match.groups())
+    strings = {
+        'CompanyName': 'Wolklaw',
+        'FileDescription': 'QuickOCR',
+        'FileVersion': version,
+        'InternalName': 'QuickOCR',
+        'LegalCopyright': 'GPL-3.0 - github.com/Wolklaw/QuickOCR',
+        'OriginalFilename': 'QuickOCR.exe',
+        'ProductName': 'QuickOCR',
+        'ProductVersion': version,
+    }
+    table = ',\n'.join(f"          StringStruct({key!r}, {value!r})"
+                       for key, value in strings.items())
+    os.makedirs(os.path.dirname(VERSION_FILE), exist_ok=True)
+    with open(VERSION_FILE, 'w', encoding='utf-8') as handle:
+        handle.write(f"""VSVersionInfo(
+  ffi=FixedFileInfo(filevers={numbers}, prodvers={numbers}, mask=0x3f, flags=0x0,
+                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([
+      StringTable('040904B0', [
+{table}
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+""")
+    print(f"wrote {VERSION_FILE} for version {version}")
+
+
 def main():
     if not os.path.isdir(SOURCE_DIR):
         sys.exit(f"missing {SOURCE_DIR}")
+    write_version_info()
 
     files = required_files()
     if os.path.isdir(STAGE_DIR):
-        shutil.rmtree(STAGE_DIR)
+        remove_tree(STAGE_DIR)
     os.makedirs(os.path.join(STAGE_DIR, 'tessdata'), exist_ok=True)
 
     total = 0

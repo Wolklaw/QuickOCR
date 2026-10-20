@@ -143,6 +143,38 @@ class TestWindowPlacement(RedirectedDataDir):
         self.assertOnScreen({"x": "left", "y": None})
 
 
+class TestInterface(unittest.TestCase):
+    def test_language_labels(self):
+        self.assertEqual(quickocr.language_label('eng+fra'), "English + French")
+        self.assertEqual(quickocr.language_label('xyz'), "xyz")
+
+    def test_preview_keeps_lines_and_truncates(self):
+        text = "short\n\n" + "x" * 80 + "\nthree\nfour\nfive\nsix"
+        preview = quickocr.ResultPopup._preview(text, columns=20).splitlines()
+        self.assertEqual(len(preview), quickocr.ResultPopup.PREVIEW_LINES)
+        self.assertEqual(preview[0], "short", "blank lines are dropped")
+        self.assertEqual(len(preview[1]), 20)
+        self.assertTrue(preview[1].endswith("…"))
+        self.assertEqual(preview[-1], "… and 3 more lines")
+
+    def test_rounded_button_respects_disabled_state(self):
+        require_windows()
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            clicks = []
+            button = quickocr.RoundedButton(root, "Go", lambda: clicks.append(1),
+                                            width=120, height=36, background="#000000")
+            button._set(hover=True, pressed=True)
+            button._on_release(None)
+            button.set_state(enabled=False)
+            button._set(hover=True, pressed=True)
+            button._on_release(None)
+            self.assertEqual(clicks, [1], "a disabled button must not fire")
+        finally:
+            root.destroy()
+
+
 class TestClipboard(unittest.TestCase):
     """v1.0.1 announced 'COPIED TO CLIPBOARD' whether or not the copy worked."""
 

@@ -8,9 +8,10 @@ rem Stage only the part of Tesseract the app actually needs (94 MB -> ~34 MB).
 py make_bundle.py
 if errorlevel 1 goto :failed
 
-py -m PyInstaller --noconsole --onefile --name "QuickOCR" --icon="aa.ico" ^
+py -m PyInstaller --noconsole --onefile --name "QuickOCR" --icon="quickocr.ico" ^
+  --version-file "build\version_info.txt" ^
   --add-data "build\bundle\Tesseract-OCR;Tesseract-OCR" ^
-  --add-data "aa.ico;." ^
+  --add-data "quickocr.ico;." ^
   quickocr.py
 if errorlevel 1 goto :failed
 

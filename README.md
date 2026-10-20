@@ -1,9 +1,17 @@
 [🇫🇷 Version Française](README_FR.md)
+
+<img src="icon.png" width="80" alt="QuickOCR icon">
+
 # QuickOCR
 A portable, offline OCR utility for Windows. Instantly capture and extract text from images, videos, games, and uncopiable UI elements.
 
 [![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Result-blue?logo=virustotal)](https://www.virustotal.com/gui/file/b0f5e4cbd0048ef9d6329f7d71e0a05cceda1d62596f63d01b0e3d1489617298/detection)
 [![Softpedia](https://img.shields.io/badge/Softpedia-Reviewed_4.5%2F5-brightgreen)](https://www.softpedia.com/get/Office-tools/Text-editors/QuickOCR.shtml)
+
+> **End of life.** Version 1.2.0 is the final release. The Windows Snipping Tool can now copy
+> text straight out of a screenshot (*Text actions*, Windows 11), which covers most of what
+> QuickOCR does, so I finished this release to finish the project. QuickOCR still works and stays
+> available, but no further updates or support are planned. See the [changelog](CHANGELOG.md).
 
 ## Features
 * **Visual Snipping:** Draw a box on your screen to capture text.
@@ -15,7 +23,7 @@ A portable, offline OCR utility for Windows. Instantly capture and extract text 
 ## How to Use
 1. Download `QuickOCR.exe` from the link below.
 2. Run `QuickOCR.exe` (It is a single file, no installation needed).
-3. Click **CAPTURE ZONE**.
+3. Click **Capture text**.
 4. Draw a box around any text.
 5. The text is automatically copied to your clipboard.
 
