@@ -57,6 +57,41 @@ class TestConfig(RedirectedDataDir):
         quickocr.ConfigManager.save({"bad": object()})       # logged, not raised
         self.assertEqual(quickocr.ConfigManager.load(), {})
 
+    def test_failed_save_keeps_the_previous_config(self):
+        """Writing in place truncated the file first, so a failed save wiped the config."""
+        quickocr.ConfigManager.save({"x": 10, "lang": "eng"})
+        quickocr.ConfigManager.save({"x": 20, "bad": object()})
+        self.assertEqual(quickocr.ConfigManager.load(), {"x": 10, "lang": "eng"})
+        self.assertEqual(os.listdir(self._tmp.name), [quickocr.CONFIG_FILENAME],
+                         "no temp file may be left behind")
+
+
+class TestMonitorAtCursor(unittest.TestCase):
+    """The overlay hint used the virtual desktop's centre and top edge, which on a mixed
+    layout can be above a shorter monitor or on a bezel - off every screen."""
+
+    def test_returns_the_monitor_holding_the_cursor(self):
+        require_windows()
+        quickocr._configure_win32()
+        import ctypes
+        from ctypes import wintypes
+        point = wintypes.POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(point))
+        left, top, right, bottom = quickocr.monitor_at_cursor()
+        self.assertTrue(left <= point.x < right and top <= point.y < bottom,
+                        f"cursor {point.x},{point.y} not in {left, top, right, bottom}")
+        v_x, v_y, v_width, v_height = quickocr.virtual_screen()
+        self.assertTrue(v_x <= left and right <= v_x + v_width)
+        self.assertTrue(v_y <= top and bottom <= v_y + v_height)
+
+    def test_work_area_fits_inside_the_monitor(self):
+        require_windows()
+        quickocr._configure_win32()
+        m_left, m_top, m_right, m_bottom = quickocr.monitor_at_cursor()
+        left, top, right, bottom = quickocr.monitor_at_cursor(work_area=True)
+        self.assertTrue(m_left <= left < right <= m_right)
+        self.assertTrue(m_top <= top < bottom <= m_bottom)
+
 
 class TestUserDataDir(unittest.TestCase):
     def test_survives_a_missing_appdata(self):

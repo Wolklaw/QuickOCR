@@ -103,6 +103,25 @@ class TestOverlayTakesFocus(OverlayTestCase):
         self.assertCancelled(overlay)
 
 
+class TestHint(OverlayTestCase):
+    def test_cancel_hint_is_on_a_visible_monitor(self):
+        """It was drawn at the virtual desktop's centre and top edge, which on a mixed
+        layout is above a shorter monitor or across a bezel - so nobody saw how to cancel."""
+        overlay = self.open_overlay()
+        try:
+            texts = [item for item in overlay.canvas.find_all()
+                     if overlay.canvas.type(item) == 'text']
+            self.assertEqual(len(texts), 1)
+            x0, y0, x1, y1 = overlay.canvas.bbox(texts[0])
+            left, top, right, bottom = quickocr.monitor_at_cursor()
+            self.assertTrue(left <= x0 + overlay.v_x and x1 + overlay.v_x <= right,
+                            "hint must sit horizontally inside the cursor's monitor")
+            self.assertTrue(top <= y0 + overlay.v_y and y1 + overlay.v_y <= bottom,
+                            "hint must sit vertically inside the cursor's monitor")
+        finally:
+            overlay._finish(None)
+
+
 class TestCapture(OverlayTestCase):
     def test_drag_returns_the_requested_region_undimmed(self):
         from PIL import ImageGrab, ImageStat

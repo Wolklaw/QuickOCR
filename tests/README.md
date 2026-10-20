@@ -23,9 +23,9 @@ about twenty seconds. Don't type during the run.
 
 | File | Covers |
 |---|---|
-| `test_ocr.py` | Text that v1.0.1 garbled or erased (grey and low-contrast), variant selection, language discovery, non-ASCII passthrough |
-| `test_overlay.py` | Every way the overlay must close, that it takes keyboard focus, that captures exclude the overlay's own dimming, and the watchdog |
-| `test_app.py` | Config corruption, window placement, clipboard read-back verification |
+| `test_ocr.py` | Text that v1.0.1 garbled or erased (grey and low-contrast), variant selection, language discovery, non-ASCII passthrough, the bundled language data winning over a stray `TESSDATA_PREFIX`, failures being reported |
+| `test_overlay.py` | Every way the overlay must close, that it takes keyboard focus, that the cancel hint is on a visible monitor, that captures exclude the overlay's own dimming, and the watchdog |
+| `test_app.py` | Config corruption and interrupted saves, window placement, monitor lookup, clipboard read-back verification |
 
 `rival_window.py` is a helper, not a test: it is a second process that steals the foreground,
 standing in for Task Manager. It has to be a separate process - a window inside the test
@@ -39,3 +39,8 @@ process is blocked by the overlay's Tk grab and would never take the foreground.
 * A topmost full-desktop overlay hid anything the user brought up next, Task Manager included.
 * A fixed threshold erased any text lighter than about `#5a5a5a`, silently.
 * The result popup claimed "COPIED TO CLIPBOARD" whether or not the copy succeeded.
+* A `TESSDATA_PREFIX` from a separate Tesseract install replaced the bundled language data, so
+  `eng+fra` silently lost French and French on its own read nothing.
+* A missing `tesseract.exe` or language file was reported as "No text found".
+* The "press Esc to cancel" hint was drawn off-screen on multi-monitor layouts.
+* A failed config save truncated the existing config.

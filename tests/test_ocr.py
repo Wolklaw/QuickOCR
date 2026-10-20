@@ -4,6 +4,7 @@ The regressions that matter here are real ones: v1.0.1 inverted every capture an
 fixed threshold, which silently garbled or erased any text lighter than about #5a5a5a.
 """
 
+import os
 import unittest
 
 from helpers import (SENTENCE, load_quickocr, normalise, render_text, require_tesseract,
@@ -104,8 +105,53 @@ class TestLanguages(OCRTestCase):
         self.assertEqual(len(choices), len(set(choices)), "choices must not repeat")
 
     def test_falls_back_when_a_saved_language_is_missing(self):
+        """Back to the default combination, not whichever language sorts first."""
         engine = quickocr.OCREngine('deu-not-installed')
-        self.assertIn(engine.lang, engine.available)
+        self.assertTrue(engine.supports(engine.lang))
+        if engine.supports(quickocr.DEFAULT_LANG):
+            self.assertEqual(engine.lang, quickocr.DEFAULT_LANG)
+
+
+class TestBundledDataIsUsed(OCRTestCase):
+    """A TESSDATA_PREFIX left by a separate Tesseract install took over from the bundled
+    data: eng+fra silently lost French, and French on its own read nothing at all."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self._saved = os.environ.get('TESSDATA_PREFIX')
+        self._tmp = tempfile.TemporaryDirectory()
+        shutil.copy(os.path.join(self.engine.tessdata_dir, 'eng.traineddata'), self._tmp.name)
+        os.environ['TESSDATA_PREFIX'] = self._tmp.name       # an install without French
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop('TESSDATA_PREFIX', None)
+        else:
+            os.environ['TESSDATA_PREFIX'] = self._saved
+        self._tmp.cleanup()
+
+    def test_stray_tessdata_prefix_is_ignored(self):
+        if not self.engine.supports('fra'):
+            self.skipTest("French language data is not installed")
+        engine = quickocr.OCREngine('fra')
+        result = engine.extract_text(render_text("hôtel très élégant", width=300, size=20))
+        self.assertIn("è", result.text)
+
+
+class TestFailuresAreReported(OCRTestCase):
+    def test_missing_tesseract_raises_instead_of_reading_nothing(self):
+        """Every variant failing used to come back as an empty read - "No text found"."""
+        import pytesseract
+        engine = quickocr.OCREngine()
+        saved = pytesseract.pytesseract.tesseract_cmd
+        pytesseract.pytesseract.tesseract_cmd = os.path.join(self.engine.tessdata_dir,
+                                                             'no-such-tesseract.exe')
+        try:
+            with self.assertRaises(OSError):
+                engine.extract_text(render_text())
+        finally:
+            pytesseract.pytesseract.tesseract_cmd = saved
 
 
 if __name__ == '__main__':

@@ -22,7 +22,7 @@ from PIL import ImageGrab, Image, ImageOps
 from pytesseract import Output
 
 APP_NAME = "QuickOCR"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 CONFIG_FILENAME = "config.json"
 LOG_FILENAME = "quickocr.log"
 
@@ -58,8 +58,16 @@ WS_EX_TOOLWINDOW = 0x00000080
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+MONITOR_DEFAULTTONEAREST = 2
 
 log = logging.getLogger(APP_NAME)
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [('cbSize', wintypes.DWORD),
+                ('rcMonitor', wintypes.RECT),
+                ('rcWork', wintypes.RECT),
+                ('dwFlags', wintypes.DWORD)]
 
 
 def _configure_win32() -> None:
@@ -85,6 +93,10 @@ def _configure_win32() -> None:
         user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
         user32.GetDpiForWindow.argtypes = [wintypes.HWND]
         user32.GetDpiForWindow.restype = wintypes.UINT
+        user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+        user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        user32.MonitorFromPoint.restype = wintypes.HMONITOR
+        user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
     except (AttributeError, OSError):
         log.warning("could not declare win32 prototypes")
 
@@ -211,6 +223,28 @@ def virtual_screen() -> Tuple[int, int, int, int]:
         return (0, 0, 1920, 1080)
 
 
+def monitor_at_cursor(work_area: bool = False) -> Tuple[int, int, int, int]:
+    """(left, top, right, bottom) of the monitor under the mouse, in physical pixels.
+
+    The virtual desktop is the bounding box of every monitor, so its centre can fall on a
+    bezel and its top edge can sit above a shorter monitor - nowhere anyone can see.
+    """
+    if os.name == 'nt':
+        try:
+            user32 = ctypes.windll.user32
+            point = wintypes.POINT()
+            if user32.GetCursorPos(ctypes.byref(point)):
+                monitor = user32.MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST)
+                info = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+                if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                    rect = info.rcWork if work_area else info.rcMonitor
+                    return (rect.left, rect.top, rect.right, rect.bottom)
+        except (AttributeError, OSError, ctypes.ArgumentError):
+            log.exception("could not find the monitor under the cursor")
+    x, y, width, height = virtual_screen()
+    return (x, y, x + width, y + height)
+
+
 def get_resource_path(relative_path: str) -> str:
     try:
         base_path = sys._MEIPASS
@@ -256,11 +290,22 @@ class ConfigManager:
 
     @staticmethod
     def save(data: Dict[str, Any]):
+        """Write a temp file and swap it in, so a failed or interrupted save keeps the old
+        config instead of leaving it truncated."""
+        tmp_path = None
         try:
-            with open(ConfigManager._get_path(), 'w', encoding='utf-8') as f:
+            path = ConfigManager._get_path()
+            tmp_path = path + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f)
+            os.replace(tmp_path, path)
         except (OSError, ValueError, TypeError) as exc:
             log.warning("could not write config: %s", exc)
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
 
 class OCRResult(NamedTuple):
@@ -285,8 +330,19 @@ class OCREngine:
             pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
         if not os.path.exists(self.tesseract_cmd):
             log.error("bundled tesseract is missing: %s", self.tesseract_cmd)
+        # Tesseract reads its language data from TESSDATA_PREFIX before its own folder, so a
+        # separate Tesseract install would otherwise hijack the bundled data: eng+fra quietly
+        # loses French, and any language missing from that other folder fails outright.
+        stray = os.environ.get('TESSDATA_PREFIX')
+        if stray and os.path.normcase(os.path.abspath(stray)) != os.path.normcase(self.tessdata_dir):
+            log.info("ignoring TESSDATA_PREFIX=%s in favour of the bundled data", stray)
+        os.environ['TESSDATA_PREFIX'] = self.tessdata_dir
         self.available = self.available_languages()
-        self.lang = lang if self.supports(lang) else (self.available[0] if self.available else 'eng')
+        if self.supports(DEFAULT_LANG):
+            fallback = DEFAULT_LANG
+        else:
+            fallback = self.available[0] if self.available else 'eng'
+        self.lang = lang if self.supports(lang) else fallback
         log.info("languages available=%s using=%s", ','.join(self.available) or 'none', self.lang)
 
     def available_languages(self) -> List[str]:
@@ -383,9 +439,13 @@ class OCREngine:
         return OCRResult(text, mean, variant)
 
     def extract_text(self, img: Image.Image) -> OCRResult:
+        """Raises the last error if every variant failed - a missing tesseract.exe or
+        language file must not be reported to the user as "No text found"."""
         best = OCRResult('', 0.0, 'none')
         started = time.monotonic()
         last_took = 0.0
+        last_error: Optional[Exception] = None
+        succeeded = False
         for variant, prepare in (('otsu', self._prep_otsu),
                                  ('fixed', self._prep_fixed),
                                  ('gray', self._prep_gray)):
@@ -397,17 +457,23 @@ class OCREngine:
             attempt = time.monotonic()
             try:
                 result = self._run(prepare(img), variant)
-            except (pytesseract.TesseractError, RuntimeError, OSError, ValueError):
+            except (pytesseract.TesseractError, RuntimeError, OSError, ValueError) as exc:
                 log.exception("variant %s failed", variant)
+                last_error = exc
                 continue
             finally:
                 last_took = time.monotonic() - attempt
+            succeeded = True
             log.info("variant=%s conf=%.1f chars=%d in %.2fs",
                      variant, result.confidence, len(result.text), last_took)
-            if result.confidence > best.confidence:
+            # on equal confidence, some text beats none
+            if ((result.confidence, bool(result.text.strip()))
+                    > (best.confidence, bool(best.text.strip()))):
                 best = result
             if best.confidence >= CONF_ACCEPT:
                 break
+        if not succeeded and last_error is not None:
+            raise last_error
         log.info("best variant=%s conf=%.1f in %.2fs", best.variant, best.confidence,
                  time.monotonic() - started)
         return best
@@ -441,8 +507,10 @@ class SnippingOverlay(tk.Toplevel):
 
         self.canvas = tk.Canvas(self, cursor="cross", bg="grey11", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        # on the monitor the user is looking at; canvas coordinates start at the virtual origin
+        left, top, right, _ = monitor_at_cursor()
         self.canvas.create_text(
-            self.v_width // 2, 40,
+            (left + right) // 2 - self.v_x, top - self.v_y + 40,
             text="Drag to select text  -  click once, right-click or press Esc to cancel",
             fill="#ffffff", font=("Segoe UI", 14)
         )
@@ -621,8 +689,10 @@ class ResultPopup(tk.Toplevel):
 
         scale = dpi_scale(self)
         w, h = int(400 * scale), int(260 * scale)
-        x = (self.winfo_screenwidth() - w) // 2
-        y = (self.winfo_screenheight() - h) // 2
+        # centre on the monitor where the snip was taken, not always on the primary one
+        left, top, right, bottom = monitor_at_cursor(work_area=True)
+        x = left + max(0, (right - left - w) // 2)
+        y = top + max(0, (bottom - top - h) // 2)
         self.geometry(f"{w}x{h}+{x}+{y}")
 
         unreliable = result.confidence < CONF_WARN
@@ -685,6 +755,8 @@ class App:
         self.root.overrideredirect(True)
         self.root.configure(bg=THEME["bg_main"])
         self.root.report_callback_exception = self._on_tk_error
+        # closing from the taskbar while minimized must still save the config
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         try:
             icon_path = get_resource_path("aa.ico")
@@ -698,6 +770,7 @@ class App:
         self.ocr = OCREngine(saved_lang if isinstance(saved_lang, str) else DEFAULT_LANG)
         self.results: "queue.Queue[Tuple[str, Any]]" = queue.Queue()
         self.busy = False
+        self.popup: Optional[ResultPopup] = None
 
         self._setup_window_geometry()
         self._build_custom_titlebar()
@@ -735,10 +808,14 @@ class App:
         self.title_bar.bind("<Button-1>", self._start_move)
         self.title_bar.bind("<B1-Motion>", self._do_move)
 
-        tk.Label(
+        title = tk.Label(
             self.title_bar, text=f"{APP_NAME}",
             bg=THEME["bg_header"], fg=THEME["fg_text"], font=("Segoe UI", 9, "bold")
-        ).pack(side=tk.LEFT, padx=10)
+        )
+        title.pack(side=tk.LEFT, padx=10)
+        # the label sits on the bar, so it has to be a drag handle too
+        title.bind("<Button-1>", self._start_move)
+        title.bind("<B1-Motion>", self._do_move)
 
         self._create_titlebar_btn("✕", self._on_close, THEME["close_hov"])
         self._create_titlebar_btn("—", self._minimize, THEME["min_hov"])
@@ -821,8 +898,10 @@ class App:
             force_taskbar_visibility(self.root)
 
     def _on_close(self):
-        self.config["x"] = self.root.winfo_x()
-        self.config["y"] = self.root.winfo_y()
+        # a minimized window sits at (-32000, -32000); keep the last real position instead
+        if self.root.state() == 'normal':
+            self.config["x"] = self.root.winfo_x()
+            self.config["y"] = self.root.winfo_y()
         self.config["lang"] = self.ocr.lang
         self.config["version"] = VERSION
         ConfigManager.save(self.config)
@@ -840,6 +919,7 @@ class App:
     def _start_snip(self):
         if self.busy:
             return
+        self._close_popup()             # it is topmost, so it would end up inside the snip
         self.root.withdraw()
         self.root.after(150, self._open_overlay)
 
@@ -894,7 +974,16 @@ class App:
         if error:
             messagebox.showerror(APP_NAME, f"Could not copy to the clipboard:\n{error}")
             return
-        ResultPopup(self.root, result)
+        self._close_popup()
+        self.popup = ResultPopup(self.root, result)
+
+    def _close_popup(self):
+        popup, self.popup = self.popup, None
+        try:
+            if popup is not None and popup.winfo_exists():
+                popup.destroy()
+        except tk.TclError:
+            pass
 
     @staticmethod
     def _copy_to_clipboard(text: str) -> Optional[str]:
